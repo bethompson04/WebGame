@@ -92,74 +92,7 @@ function updatePlayersList() {
     `;
 }
 
-// Create DOM cursor elements
-const cursor = document.createElement('div');
-cursor.style.cssText = `
-    position: fixed;
-    width: 32px;
-    height: 32px;
-    pointer-events: none;
-    z-index: 10000;
-    display: none;
-    background-image: url('${SPRITE_URLS.cursor}');
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: top left;
-    mix-blend-mode: multiply;
-`;
-
-document.body.appendChild(cursor);
-
-// Initialize cursor behavior
-function initializeCursor() {
-    const cursorColor = urlParams.get('cursorColor') || 'FFFFFF';
-    debugLog(`Setting cursor color to #${cursorColor}`);
-    cursor.style.backgroundColor = `#${cursorColor}`;
-    
-    app.view.addEventListener('mouseenter', () => {
-        app.view.style.cursor = 'none';
-        cursor.style.display = 'block';
-    });
-    
-    app.view.addEventListener('mouseleave', () => {
-        app.view.style.cursor = 'auto';
-        cursor.style.display = 'none';
-    });
-}
-
-// Helper function to calculate hue rotation from hex color
-function getHueRotation(hexColor) {
-    // Convert hex to RGB
-    const r = parseInt(hexColor.substr(0, 2), 16) / 255;
-    const g = parseInt(hexColor.substr(2, 2), 16) / 255;
-    const b = parseInt(hexColor.substr(4, 2), 16) / 255;
-    
-    // Calculate hue
-    let max = Math.max(r, g, b);
-    let min = Math.min(r, g, b);
-    let h = 0;
-    
-    if (max === min) {
-        h = 0;
-    } else if (max === r) {
-        h = 60 * ((g - b) / (max - min));
-    } else if (max === g) {
-        h = 60 * (2 + (b - r) / (max - min));
-    } else {
-        h = 60 * (4 + (r - g) / (max - min));
-    }
-    
-    if (h < 0) h += 360;
-    return h;
-}
-
-// Update mousemove handler
-document.addEventListener('mousemove', updateCursorPosition);
-
-// Initialize PixiJS
-debugLog('Initializing PixiJS...');
-
-// Function to initialize PixiJS
+// Update initializePixiJS function to force sprite reload
 function initializePixiJS() {
     try {
         debugLog('Creating PixiJS application...');
@@ -179,11 +112,18 @@ function initializePixiJS() {
 
         debugLog('Application created, loading sprites...');
 
-        // Load both cursor and flag sprites
-        return PIXI.Assets.load([SPRITE_URLS.cursor, SPRITE_URLS.flag]).then((textures) => {
+        // Clear texture cache to force reload
+        PIXI.Assets.unload(Object.values(SPRITE_URLS));
+        
+        // Load sprites with cache busting
+        const timestamp = Date.now();
+        const spritesToLoad = Object.values(SPRITE_URLS).map(url => `${url}?t=${timestamp}`);
+        
+        return PIXI.Assets.load(spritesToLoad).then((textures) => {
             debugLog('Sprites loaded successfully');
-            spriteTextures.cursor = PIXI.Texture.from(SPRITE_URLS.cursor);
-            spriteTextures.flag = PIXI.Texture.from(SPRITE_URLS.flag);
+            // Store textures with original URLs as keys
+            spriteTextures.cursor = PIXI.Texture.from(`${SPRITE_URLS.cursor}?t=${timestamp}`);
+            spriteTextures.flag = PIXI.Texture.from(`${SPRITE_URLS.flag}?t=${timestamp}`);
             
             if (!gameCanvas) {
                 throw new Error('gameCanvas element not found in DOM');
@@ -236,86 +176,76 @@ function initializePixiJS() {
     }
 }
 
-// Update createCell function to properly create colored flag sprite
-function createCell(x, y) {
-    const cell = new PIXI.Container();
-    cell.x = x * CELL_SIZE;
-    cell.y = y * CELL_SIZE;
+// Update the DOM cursor element to also use cache busting
+const timestamp = Date.now();
+const cursor = document.createElement('div');
+cursor.style.cssText = `
+    position: fixed;
+    width: 32px;
+    height: 32px;
+    pointer-events: none;
+    z-index: 10000;
+    display: none;
+    background-image: url('${SPRITE_URLS.cursor}?t=${timestamp}');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: top left;
+`;
 
-    // Background
-    const background = new PIXI.Graphics();
-    background.lineStyle(GRID_LINE_WIDTH, GRID_LINE_COLOR);
-    background.beginFill(0xCCCCCC);
-    background.drawRect(0, 0, CELL_SIZE, CELL_SIZE);
-    background.endFill();
+document.body.appendChild(cursor);
+
+// Initialize cursor behavior
+function initializeCursor() {
+    const cursorColor = urlParams.get('cursorColor') || 'FFFFFF';
+    debugLog(`Setting cursor color to #${cursorColor}`);
     
-    // Add 3D effect
-    background.lineStyle(1, 0xFFFFFF, 0.5);
-    background.moveTo(1, CELL_SIZE - 1);
-    background.lineTo(1, 1);
-    background.lineTo(CELL_SIZE - 1, 1);
-    background.lineStyle(1, 0x999999, 0.5);
-    background.moveTo(CELL_SIZE - 1, 1);
-    background.lineTo(CELL_SIZE - 1, CELL_SIZE - 1);
-    background.lineTo(1, CELL_SIZE - 1);
+    // Convert hex color to RGB for the CSS filter
+    const r = parseInt(cursorColor.substr(0, 2), 16);
+    const g = parseInt(cursorColor.substr(2, 2), 16);
+    const b = parseInt(cursorColor.substr(4, 2), 16);
     
-    cell.addChild(background);
-
-    // Text (for numbers)
-    const text = new PIXI.Text('', {
-        fontFamily: 'Arial',
-        fontSize: 18,
-        fill: 0x000000,
-        align: 'center',
-        fontWeight: 'bold'
-    });
-    text.anchor.set(0.5);
-    text.x = CELL_SIZE / 2;
-    text.y = CELL_SIZE / 2;
-    text.visible = false;
-    cell.addChild(text);
-
-    // Flag sprite
-    const flag = new PIXI.Sprite(spriteTextures.flag);
-    flag.anchor.set(0.5);
-    flag.x = CELL_SIZE / 2;
-    flag.y = CELL_SIZE / 2;
-    flag.width = CELL_SIZE * 0.8;
-    flag.height = CELL_SIZE * 0.8;
-    flag.visible = false;
-    cell.addChild(flag);
-
-    // Make cell interactive
-    cell.eventMode = 'static';
-    cell.cursor = 'pointer';
+    // Apply color using CSS filter instead of background-color
+    cursor.style.filter = `brightness(0) saturate(100%) invert(${r / 255}) sepia(${g / 255}) saturate(${b / 255})`;
     
-    cell.on('mouseover', () => {
-        if (!revealed.has(y * GRID_SIZE + x) && !flagged.has(y * GRID_SIZE + x)) {
-            background.tint = 0xDDDDDD;
-        }
+    app.view.addEventListener('mouseenter', () => {
+        app.view.style.cursor = 'none';
+        cursor.style.display = 'block';
     });
     
-    cell.on('mouseout', () => {
-        if (!revealed.has(y * GRID_SIZE + x) && !flagged.has(y * GRID_SIZE + x)) {
-            background.tint = 0xFFFFFF;
-        }
+    app.view.addEventListener('mouseleave', () => {
+        app.view.style.cursor = 'auto';
+        cursor.style.display = 'none';
     });
-
-    cell.on('rightclick', (event) => {
-        if (gameStarted) {
-            event.stopPropagation();
-            socket.emit('toggleFlag', { x, y, playerId: socket.id });
-        }
-    });
-
-    cell.on('click', () => {
-        if (gameStarted && !flagged.has(y * GRID_SIZE + x)) {
-            socket.emit('revealCell', { x, y });
-        }
-    });
-
-    return cell;
 }
+
+// Helper function to calculate hue rotation from hex color
+function getHueRotation(hexColor) {
+    // Convert hex to RGB
+    const r = parseInt(hexColor.substr(0, 2), 16) / 255;
+    const g = parseInt(hexColor.substr(2, 2), 16) / 255;
+    const b = parseInt(hexColor.substr(4, 2), 16) / 255;
+    
+    // Calculate hue
+    let max = Math.max(r, g, b);
+    let min = Math.min(r, g, b);
+    let h = 0;
+    
+    if (max === min) {
+        h = 0;
+    } else if (max === r) {
+        h = 60 * ((g - b) / (max - min));
+    } else if (max === g) {
+        h = 60 * (2 + (b - r) / (max - min));
+    } else {
+        h = 60 * (4 + (r - g) / (max - min));
+    }
+    
+    if (h < 0) h += 360;
+    return h;
+}
+
+// Update mousemove handler
+document.addEventListener('mousemove', updateCursorPosition);
 
 // Initialize PixiJS with better error handling
 debugLog('Starting PixiJS initialization...');
@@ -521,6 +451,110 @@ function updateBoard() {
     }
 }
 
+// Add helper function to convert hex color to RGB
+function hexToRGB(hex) {
+    const r = parseInt(hex.substr(0, 2), 16) / 255;
+    const g = parseInt(hex.substr(2, 2), 16) / 255;
+    const b = parseInt(hex.substr(4, 2), 16) / 255;
+    return [r, g, b];
+}
+
+// Add helper function to create color matrix for a given color
+function createColorMatrix(hexColor) {
+    const [r, g, b] = hexToRGB(hexColor);
+    return [
+        r, 0, 0, 0, 0,
+        0, g, 0, 0, 0,
+        0, 0, b, 0, 0,
+        0, 0, 0, 1, 0
+    ];
+}
+
+// Update createCell function to use ColorMatrixFilter
+function createCell(x, y) {
+    const cell = new PIXI.Container();
+    cell.x = x * CELL_SIZE;
+    cell.y = y * CELL_SIZE;
+
+    // Background
+    const background = new PIXI.Graphics();
+    background.lineStyle(GRID_LINE_WIDTH, GRID_LINE_COLOR);
+    background.beginFill(0xCCCCCC);
+    background.drawRect(0, 0, CELL_SIZE, CELL_SIZE);
+    background.endFill();
+    
+    // Add 3D effect
+    background.lineStyle(1, 0xFFFFFF, 0.5);
+    background.moveTo(1, CELL_SIZE - 1);
+    background.lineTo(1, 1);
+    background.lineTo(CELL_SIZE - 1, 1);
+    background.lineStyle(1, 0x999999, 0.5);
+    background.moveTo(CELL_SIZE - 1, 1);
+    background.lineTo(CELL_SIZE - 1, CELL_SIZE - 1);
+    background.lineTo(1, CELL_SIZE - 1);
+    
+    cell.addChild(background);
+
+    // Text (for numbers)
+    const text = new PIXI.Text('', {
+        fontFamily: 'Arial',
+        fontSize: 18,
+        fill: 0x000000,
+        align: 'center',
+        fontWeight: 'bold'
+    });
+    text.anchor.set(0.5);
+    text.x = CELL_SIZE / 2;
+    text.y = CELL_SIZE / 2;
+    text.visible = false;
+    cell.addChild(text);
+
+    // Flag sprite
+    const flag = new PIXI.Sprite(spriteTextures.flag);
+    flag.anchor.set(0.5);
+    flag.x = CELL_SIZE / 2;
+    flag.y = CELL_SIZE / 2;
+    flag.width = CELL_SIZE * 0.8;
+    flag.height = CELL_SIZE * 0.8;
+    flag.visible = false;
+    // Create a ColorMatrixFilter but don't apply it yet
+    flag.colorMatrix = new PIXI.ColorMatrixFilter();
+    flag.filters = [flag.colorMatrix];
+    cell.addChild(flag);
+
+    // Make cell interactive
+    cell.eventMode = 'static';
+    cell.cursor = 'pointer';
+    
+    cell.on('mouseover', () => {
+        if (!revealed.has(y * GRID_SIZE + x) && !flagged.has(y * GRID_SIZE + x)) {
+            background.tint = 0xDDDDDD;
+        }
+    });
+    
+    cell.on('mouseout', () => {
+        if (!revealed.has(y * GRID_SIZE + x) && !flagged.has(y * GRID_SIZE + x)) {
+            background.tint = 0xFFFFFF;
+        }
+    });
+
+    cell.on('rightclick', (event) => {
+        if (gameStarted) {
+            event.stopPropagation();
+            socket.emit('toggleFlag', { x, y, playerId: socket.id });
+        }
+    });
+
+    cell.on('click', () => {
+        if (gameStarted && !flagged.has(y * GRID_SIZE + x)) {
+            socket.emit('revealCell', { x, y });
+        }
+    });
+
+    return cell;
+}
+
+// Update updateCell function to use ColorMatrixFilter
 function updateCell(x, y, value) {
     if (!cells || !cells[y] || !cells[y][x]) {
         debugLog(`Warning: Trying to update cell at ${x},${y} but cells are not initialized`);
@@ -537,8 +571,9 @@ function updateCell(x, y, value) {
         const playerId = flagOwners.get(index);
         if (playerId && players.has(playerId)) {
             const playerColor = players.get(playerId).cursorColor || 'FFFFFF';
-            flag.tint = parseInt(playerColor, 16);
-            debugLog(`Flag color set to ${playerColor} for player ${playerId}`);
+            // Apply color matrix instead of tint
+            flag.colorMatrix.matrix = createColorMatrix(playerColor);
+            debugLog(`Flag color matrix set for player ${playerId} with color ${playerColor}`);
         }
         flag.visible = true;
         text.visible = false;
