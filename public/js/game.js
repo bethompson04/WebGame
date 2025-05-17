@@ -54,7 +54,6 @@ let app = null;
 let cursors = new Map(); // Store other players' cursors
 let playerName = urlParams.get('playerName') || 'Anonymous';
 let players = new Map(); // Store player names and info
-let localCursor = null;
 
 // Add flag ownership tracking
 let flagOwners = new Map(); // Maps cell index to player ID who placed the flag
@@ -106,34 +105,16 @@ cursor.style.cssText = `
     background-size: contain;
     background-repeat: no-repeat;
     background-position: top left;
+    mix-blend-mode: multiply;
 `;
 
 document.body.appendChild(cursor);
 
-// Function to update cursor position
-function updateCursorPosition(event) {
-    cursor.style.left = `${event.clientX}px`;
-    cursor.style.top = `${event.clientY}px`;
-    
-    // Only send position if over the game canvas
-    const bounds = app.view.getBoundingClientRect();
-    if (event.clientX >= bounds.left && 
-        event.clientX <= bounds.right && 
-        event.clientY >= bounds.top && 
-        event.clientY <= bounds.bottom) {
-        // Send the exact cursor position for accurate clicking
-        socket.emit('cursorMove', {
-            x: event.clientX - bounds.left,
-            y: event.clientY - bounds.top
-        });
-    }
-}
-
 // Initialize cursor behavior
 function initializeCursor() {
     const cursorColor = urlParams.get('cursorColor') || 'FFFFFF';
-    // Apply color using filter if needed
-    // cursor.style.filter = `hue-rotate(${someValue}deg)`;
+    debugLog(`Setting cursor color to #${cursorColor}`);
+    cursor.style.backgroundColor = `#${cursorColor}`;
     
     app.view.addEventListener('mouseenter', () => {
         app.view.style.cursor = 'none';
@@ -144,6 +125,32 @@ function initializeCursor() {
         app.view.style.cursor = 'auto';
         cursor.style.display = 'none';
     });
+}
+
+// Helper function to calculate hue rotation from hex color
+function getHueRotation(hexColor) {
+    // Convert hex to RGB
+    const r = parseInt(hexColor.substr(0, 2), 16) / 255;
+    const g = parseInt(hexColor.substr(2, 2), 16) / 255;
+    const b = parseInt(hexColor.substr(4, 2), 16) / 255;
+    
+    // Calculate hue
+    let max = Math.max(r, g, b);
+    let min = Math.min(r, g, b);
+    let h = 0;
+    
+    if (max === min) {
+        h = 0;
+    } else if (max === r) {
+        h = 60 * ((g - b) / (max - min));
+    } else if (max === g) {
+        h = 60 * (2 + (b - r) / (max - min));
+    } else {
+        h = 60 * (4 + (r - g) / (max - min));
+    }
+    
+    if (h < 0) h += 360;
+    return h;
 }
 
 // Update mousemove handler
@@ -229,7 +236,7 @@ function initializePixiJS() {
     }
 }
 
-// Update createCell function to use flag sprite
+// Update createCell function to properly create colored flag sprite
 function createCell(x, y) {
     const cell = new PIXI.Container();
     cell.x = x * CELL_SIZE;
@@ -273,7 +280,7 @@ function createCell(x, y) {
     flag.anchor.set(0.5);
     flag.x = CELL_SIZE / 2;
     flag.y = CELL_SIZE / 2;
-    flag.width = CELL_SIZE * 0.8;  // Scale flag to fit cell
+    flag.width = CELL_SIZE * 0.8;
     flag.height = CELL_SIZE * 0.8;
     flag.visible = false;
     cell.addChild(flag);
@@ -282,7 +289,6 @@ function createCell(x, y) {
     cell.eventMode = 'static';
     cell.cursor = 'pointer';
     
-    // Add hover effect
     cell.on('mouseover', () => {
         if (!revealed.has(y * GRID_SIZE + x) && !flagged.has(y * GRID_SIZE + x)) {
             background.tint = 0xDDDDDD;
@@ -350,12 +356,11 @@ socket.on('error', (message) => {
 socket.on('gameState', (data) => {
     debugLog('Received game state data: ' + JSON.stringify(data));
     
-    // Initialize game state
     currentGameId = data.gameId;
     board = data.board;
     revealed = new Set(data.revealed);
     flagged = new Set(data.flagged);
-    flagOwners = new Map(data.flagOwners || []); // Initialize flag owners from server
+    flagOwners = new Map(data.flagOwners || []);
     gameStarted = true;
     
     // Update players list with current players
@@ -371,7 +376,7 @@ socket.on('gameState', (data) => {
     if (data.players && Array.isArray(data.players)) {
         data.players.forEach(player => {
             debugLog(`Processing player from game state: ${JSON.stringify(player)}`);
-            if (player.id !== socket.id) {  // Don't overwrite your own entry
+            if (player.id !== socket.id) {
                 players.set(player.id, {
                     name: player.name || 'Anonymous',
                     cursorColor: player.cursorColor || 'FFFFFF'
@@ -381,28 +386,23 @@ socket.on('gameState', (data) => {
     }
     updatePlayersList();
     
-    // Clear existing cursors
-    cursors.forEach(cursor => {
-        if (cursor && cursor.parent) {
-            cursor.parent.removeChild(cursor);
-        }
-    });
-    cursors.clear();
-    
-    // Create cursors for other players
-    if (data.players && Array.isArray(data.players)) {
-        data.players.forEach(player => {
-            if (player && player.id !== socket.id) {
-                const cursor = new PIXI.Graphics();
-                cursor.lineStyle(2, 0x000000, 1);
-                cursor.beginFill(parseInt(player.cursorColor || 'FFFFFF', 16), 0.8);
-                cursor.drawCircle(0, 0, 5);
-                cursor.endFill();
-                cursor.zIndex = 1000;
-                cursorContainer.addChild(cursor);
-                cursors.set(player.id, cursor);
+    // Initialize the game board if not already initialized
+    if (!cells || cells.length === 0) {
+        debugLog('Initializing game board...');
+        // Initialize grid
+        cells = new Array(GRID_SIZE);
+        for (let y = 0; y < GRID_SIZE; y++) {
+            cells[y] = new Array(GRID_SIZE);
+            for (let x = 0; x < GRID_SIZE; x++) {
+                const cell = createCell(x, y);
+                cells[y][x] = cell;
+                gameBoard.addChild(cell);
             }
-        });
+        }
+
+        // Center the game board
+        gameBoard.x = (app.screen.width - GRID_SIZE * CELL_SIZE) / 2;
+        gameBoard.y = (app.screen.height - GRID_SIZE * CELL_SIZE) / 2;
     }
     
     // Show game board and instructions
@@ -414,10 +414,8 @@ socket.on('gameState', (data) => {
     gameStatus.textContent = roomName ? `Game: ${roomName}` : `Game ID: ${currentGameId}`;
     
     // Update the board display
+    debugLog('Updating board display...');
     updateBoard();
-    
-    // Initialize local cursor
-    initializeLocalCursor();
 });
 
 socket.on('cellRevealed', ({ x, y, value }) => {
@@ -438,7 +436,8 @@ socket.on('flagUpdated', ({ x, y, flagged: isFlagged, playerId }) => {
     const index = y * GRID_SIZE + x;
     if (isFlagged) {
         flagged.add(index);
-        flagOwners.set(index, playerId);
+        flagOwners.set(index, playerId || socket.id); // Use socket.id as fallback
+        debugLog(`Flag owner set: ${playerId} at ${x},${y}`);
     } else {
         flagged.delete(index);
         flagOwners.delete(index);
@@ -509,6 +508,11 @@ socket.on('disconnect', () => {
 debugLog('Game initialization complete');
 
 function updateBoard() {
+    if (!cells) {
+        debugLog('Warning: Trying to update board but cells are not initialized');
+        return;
+    }
+
     for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
             const index = y * GRID_SIZE + x;
@@ -518,6 +522,11 @@ function updateBoard() {
 }
 
 function updateCell(x, y, value) {
+    if (!cells || !cells[y] || !cells[y][x]) {
+        debugLog(`Warning: Trying to update cell at ${x},${y} but cells are not initialized`);
+        return;
+    }
+
     const cell = cells[y][x];
     const index = y * GRID_SIZE + x;
     const background = cell.getChildAt(0);
@@ -525,20 +534,18 @@ function updateCell(x, y, value) {
     const flag = cell.getChildAt(2);
 
     if (flagged.has(index)) {
-        flag.visible = true;
-        text.visible = false;
-        background.tint = 0xFFFFFF;
-        
-        // Get the player who placed the flag and their color
         const playerId = flagOwners.get(index);
         if (playerId && players.has(playerId)) {
             const playerColor = players.get(playerId).cursorColor || 'FFFFFF';
             flag.tint = parseInt(playerColor, 16);
-        } else {
-            flag.tint = 0xFFFFFF; // Default white if player not found
+            debugLog(`Flag color set to ${playerColor} for player ${playerId}`);
         }
+        flag.visible = true;
+        text.visible = false;
+        background.tint = 0xFFFFFF;
     } else if (revealed.has(index)) {
         flag.visible = false;
+        text.visible = false;
         background.tint = 0xFFFFFF;
         background.clear();
         background.beginFill(0xEEEEEE);
@@ -547,12 +554,10 @@ function updateCell(x, y, value) {
         background.endFill();
         
         if (value === -1) {
-            // Mine
             text.text = '💣';
             text.visible = true;
             background.tint = 0xFF0000;
         } else if (value > 0) {
-            // Number
             text.text = value.toString();
             text.style.fill = COLORS[value];
             text.visible = true;
@@ -564,22 +569,6 @@ function updateCell(x, y, value) {
     }
 }
 
-// Initialize local cursor
-function initializeLocalCursor() {
-    const cursorColor = urlParams.get('cursorColor') || 'FFFFFF';
-    cursorDot.style.background = `#${cursorColor}`;
-    
-    app.view.addEventListener('mouseenter', () => {
-        app.view.style.cursor = 'none';
-        cursor.style.display = 'block';
-    });
-    
-    app.view.addEventListener('mouseleave', () => {
-        app.view.style.cursor = 'auto';
-        cursor.style.display = 'none';
-    });
-}
-
 // Track mouse position globally
 let lastMouseX = 0;
 let lastMouseY = 0;
@@ -587,4 +576,23 @@ document.addEventListener('mousemove', (event) => {
     lastMouseX = event.clientX;
     lastMouseY = event.clientY;
     updateCursorPosition(event);
-}); 
+});
+
+// Function to update cursor position
+function updateCursorPosition(event) {
+    cursor.style.left = `${event.clientX}px`;
+    cursor.style.top = `${event.clientY}px`;
+    
+    // Only send position if over the game canvas
+    const bounds = app.view.getBoundingClientRect();
+    if (event.clientX >= bounds.left && 
+        event.clientX <= bounds.right && 
+        event.clientY >= bounds.top && 
+        event.clientY <= bounds.bottom) {
+        // Send the exact cursor position for accurate clicking
+        socket.emit('cursorMove', {
+            x: event.clientX - bounds.left,
+            y: event.clientY - bounds.top
+        });
+    }
+} 
