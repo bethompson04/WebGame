@@ -201,9 +201,11 @@
         </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
+    <!-- Replace the socket.io script with CDN version -->
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script>
-        const socket = io();
+        // Initialize socket with your deployed server URL
+        const socket = io('https://bethompson04.github.io/WebGame/');  // Replace with your actual server URL
         const gameList = document.getElementById('gameList');
         const createGameBtn = document.getElementById('createGameBtn');
         const refreshBtn = document.getElementById('refreshBtn');
