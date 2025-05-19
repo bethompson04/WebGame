@@ -134,7 +134,7 @@
         debugLog('URL parameters:', { gameId, action, roomName });
 
         // Initialize Socket.IO connection
-        const socket = io();
+        const socket = io('http://localhost:3000');
         
         // Make socket available globally for game.js
         window.socket = socket;
@@ -143,6 +143,7 @@
         // Handle successful socket connection
         socket.on('connect', () => {
             debugLog('Socket connected, loading game script...');
+            document.getElementById('gameStatus').textContent = 'Connected, loading game...';
             
             // Dynamically load the game logic script
             const gameScript = document.createElement('script');
@@ -151,10 +152,15 @@
             // Handle successful game script load
             gameScript.onload = () => {
                 debugLog('Game script loaded, initializing game...');
+                document.getElementById('gameStatus').textContent = 'Initializing game...';
                 // Initialize game based on URL parameters
                 if (action === 'create') {
                     debugLog('Creating new game with name: ' + roomName);
-                    socket.emit('joinGame', { roomName: roomName });
+                    socket.emit('joinGame', { 
+                        roomName: roomName,
+                        cursorColor: urlParams.get('cursorColor') || 'FFFFFF',
+                        playerName: urlParams.get('playerName')
+                    });
                 } else if (gameId) {
                     debugLog('Joining existing game: ' + gameId);
                     socket.emit('joinGame', gameId);
@@ -175,6 +181,19 @@
         socket.on('connect_error', (error) => {
             debugLog('Socket connection error: ' + error);
             document.getElementById('gameStatus').textContent = 'Error connecting to server. Please refresh the page.';
+        });
+
+        // Handle game state updates
+        socket.on('gameState', (data) => {
+            debugLog('Game state received');
+            const roomName = data.roomName || 'Game Room';
+            document.getElementById('gameStatus').textContent = `Playing in: ${roomName}`;
+        });
+
+        // Handle errors from server
+        socket.on('error', (message) => {
+            debugLog('Game error: ' + message);
+            document.getElementById('gameStatus').textContent = message;
         });
     </script>
 </body>

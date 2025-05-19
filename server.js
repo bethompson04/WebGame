@@ -16,6 +16,63 @@ const MINES_COUNT = 40;   // Number of mines on the board
 // Player state
 const players = new Map(); // Store player information
 
+// Helper function to reveal adjacent cells
+function revealAdjacentCells(game, x, y, revealedCells = new Set()) {
+    console.log(`\n[FLOOD FILL] Starting at (${x},${y})`);
+    
+    // If out of bounds, stop
+    if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
+        console.log(`[FLOOD FILL] (${x},${y}) is out of bounds, stopping`);
+        return revealedCells;
+    }
+
+    const index = y * GRID_SIZE + x;
+    console.log(`[FLOOD FILL] Checking cell (${x},${y}) with value ${game.board[index]}`);
+    
+    // If already in our revealed set or flagged, stop
+    if (revealedCells.has(index)) {
+        console.log(`[FLOOD FILL] Cell (${x},${y}) already in revealed set, stopping`);
+        return revealedCells;
+    }
+    if (game.flagged.has(index)) {
+        console.log(`[FLOOD FILL] Cell (${x},${y}) is flagged, stopping`);
+        return revealedCells;
+    }
+
+    // Add current cell to revealed set
+    revealedCells.add(index);
+    console.log(`[FLOOD FILL] Added cell (${x},${y}) to revealed set. Current size: ${revealedCells.size}`);
+    
+    // If it's a mine, stop here
+    if (game.board[index] === -1) {
+        console.log(`[FLOOD FILL] Hit mine at (${x},${y}), stopping`);
+        return revealedCells;
+    }
+
+    // If it's an empty cell (0), check all adjacent cells
+    if (game.board[index] === 0) {
+        console.log(`[FLOOD FILL] Empty cell at (${x},${y}), checking adjacent cells`);
+        // Define adjacent cell offsets
+        const directions = [
+            [-1, -1], [0, -1], [1, -1],  // Top row
+            [-1,  0],          [1,  0],  // Middle row
+            [-1,  1], [0,  1], [1,  1]   // Bottom row
+        ];
+
+        // Check all 8 adjacent cells
+        for (const [dx, dy] of directions) {
+            const newX = x + dx;
+            const newY = y + dy;
+            console.log(`[FLOOD FILL] Checking adjacent cell (${newX},${newY})`);
+            revealAdjacentCells(game, newX, newY, revealedCells);
+        }
+    } else {
+        console.log(`[FLOOD FILL] Cell (${x},${y}) has value ${game.board[index]}, not expanding`);
+    }
+    
+    return revealedCells;
+}
+
 // Serve static files from the public directory
 app.use(express.static('public'));
 
@@ -161,22 +218,93 @@ io.on('connection', (socket) => {
     
     // Handle cell reveal action
     socket.on('revealCell', ({ x, y }) => {
-        const gameId = Array.from(socket.rooms)[1];  // Get current game room
+        console.log('\n[REVEAL] ====== Starting Cell Reveal ======');
+        console.log(`[REVEAL] Received reveal request for cell (${x},${y})`);
+        
+        const gameId = Array.from(socket.rooms)[1];
         const game = games.get(gameId);
         
         if (!game) {
-            console.log('Game not found for reveal:', gameId);
+            console.log('[REVEAL] Error: Game not found');
             return;
         }
         
-        // Calculate cell index and reveal if not already revealed
         const index = y * GRID_SIZE + x;
-        if (!game.revealed.has(index)) {
-            game.revealed.add(index);
-            // Notify all players in the game about the revealed cell
-            io.to(gameId).emit('cellRevealed', { x, y, value: game.board[index] });
-            console.log(`Cell revealed at (${x},${y}) in game ${gameId}`);
+        const cellValue = game.board[index];
+        console.log(`[REVEAL] Cell (${x},${y}) index: ${index}, value: ${cellValue}`);
+        
+        // Print surrounding cells for context
+        console.log('[REVEAL] Surrounding cells:');
+        for (let dy = -1; dy <= 1; dy++) {
+            let row = '[REVEAL] ';
+            for (let dx = -1; dx <= 1; dx++) {
+                const newX = x + dx;
+                const newY = y + dy;
+                if (newX >= 0 && newX < GRID_SIZE && newY >= 0 && newY < GRID_SIZE) {
+                    const newIndex = newY * GRID_SIZE + newX;
+                    const val = game.board[newIndex];
+                    row += (val === -1 ? 'M' : val) + ' ';
+                } else {
+                    row += 'X ';
+                }
+            }
+            console.log(row);
         }
+        
+        // If already revealed or flagged, ignore
+        if (game.revealed.has(index)) {
+            console.log(`[REVEAL] Cell already revealed, ignoring`);
+            return;
+        }
+        if (game.flagged.has(index)) {
+            console.log(`[REVEAL] Cell is flagged, ignoring`);
+            return;
+        }
+
+        // If it's a mine
+        if (cellValue === -1) {
+            console.log(`[REVEAL] Mine hit!`);
+            game.revealed.add(index);
+            io.to(gameId).emit('cellRevealed', { x, y, value: -1 });
+            return;
+        }
+
+        // If it's an empty cell, start flood fill
+        if (cellValue === 0) {
+            console.log(`[REVEAL] Empty cell clicked, starting flood fill`);
+            const revealedCells = revealAdjacentCells(game, x, y, new Set());
+            console.log(`[REVEAL] Flood fill complete. Cells to reveal: ${revealedCells.size}`);
+            
+            // Update game's revealed set with all newly revealed cells
+            for (const idx of revealedCells) {
+                game.revealed.add(idx);
+            }
+
+            // Convert to array of cell data and reveal
+            const cellsToReveal = Array.from(revealedCells).map(idx => {
+                const cellY = Math.floor(idx / GRID_SIZE);
+                const cellX = idx % GRID_SIZE;
+                return {
+                    x: cellX,
+                    y: cellY,
+                    value: game.board[idx]
+                };
+            });
+
+            // Reveal all cells to clients
+            console.log(`[REVEAL] Sending reveal events for ${cellsToReveal.length} cells`);
+            cellsToReveal.forEach(cell => {
+                console.log(`[REVEAL] Revealing cell (${cell.x},${cell.y}) with value ${cell.value}`);
+                io.to(gameId).emit('cellRevealed', cell);
+            });
+        } else {
+            // Just reveal this single numbered cell
+            console.log(`[REVEAL] Revealing single numbered cell with value ${cellValue}`);
+            game.revealed.add(index);
+            io.to(gameId).emit('cellRevealed', { x, y, value: cellValue });
+        }
+        
+        console.log('[REVEAL] ====== Cell Reveal Complete ======\n');
     });
     
     // Handle flag toggle action
@@ -233,6 +361,8 @@ io.on('connection', (socket) => {
 
 // Generate a new game board with mines and numbers
 function generateBoard() {
+    console.log('\n[BOARD] Generating new board...');
+    
     // Create empty board filled with zeros
     const board = new Array(GRID_SIZE * GRID_SIZE).fill(0);
     let minesPlaced = 0;
@@ -251,6 +381,8 @@ function generateBoard() {
             // Check all 8 adjacent cells
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    
                     const newX = x + dx;
                     const newY = y + dy;
                     
@@ -264,6 +396,17 @@ function generateBoard() {
                 }
             }
         }
+    }
+    
+    // Debug: Print board state
+    console.log('[BOARD] Generated board state:');
+    for (let y = 0; y < GRID_SIZE; y++) {
+        let row = '[BOARD] ';
+        for (let x = 0; x < GRID_SIZE; x++) {
+            const value = board[y * GRID_SIZE + x];
+            row += (value === -1 ? 'M' : value) + ' ';
+        }
+        console.log(row);
     }
     
     return board;

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Minesweeper - Game List</title>
+    <link rel="icon" type="image/png" href="images/flag.png">
     <style>
         body {
             margin: 0;
@@ -204,14 +205,20 @@
     <!-- Replace the socket.io script with CDN version -->
     <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script>
-        // Initialize socket with your deployed server URL
-        const socket = io('https://bethompson04.github.io/WebGame/');  // Replace with your actual server URL
+        // Initialize socket to connect to local server
+        const socket = io('http://localhost:3000');
         const gameList = document.getElementById('gameList');
         const createGameBtn = document.getElementById('createGameBtn');
         const refreshBtn = document.getElementById('refreshBtn');
         const createGameModal = document.getElementById('createGameModal');
         const createGameForm = document.getElementById('createGameForm');
         const cancelCreateBtn = document.getElementById('cancelCreateBtn');
+
+        // Add error handling for socket connection
+        socket.on('connect_error', (error) => {
+            console.error('Socket connection error:', error);
+            gameList.innerHTML = '<div class="no-games">Unable to connect to game server. Please try again later.</div>';
+        });
 
         // Request game list on page load
         socket.emit('getGameList');
@@ -255,7 +262,9 @@
             const roomName = document.getElementById('roomName').value.trim();
             const cursorColor = document.getElementById('cursorColor').value.substring(1); // Remove the # from the color
             createGameModal.classList.remove('show');
-            window.location.href = `/game.html?action=create&roomName=${encodeURIComponent(roomName)}&cursorColor=${encodeURIComponent(cursorColor)}&playerName=${encodeURIComponent(playerName)}`;
+            
+            // Update path to remove 'public/'
+            window.location.href = `game.html?action=create&roomName=${encodeURIComponent(roomName)}&cursorColor=${encodeURIComponent(cursorColor)}&playerName=${encodeURIComponent(playerName)}`;
         });
 
         // Join existing game
@@ -263,7 +272,8 @@
             // Show name prompt modal
             const playerName = prompt('Enter your name:');
             if (playerName) {
-                window.location.href = `/game.html?gameId=${gameId}&playerName=${encodeURIComponent(playerName.trim())}`;
+                // Update path to remove 'public/'
+                window.location.href = `game.html?gameId=${gameId}&playerName=${encodeURIComponent(playerName.trim())}`;
             }
         }
 

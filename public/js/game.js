@@ -19,9 +19,9 @@ debugLog('Game.js loaded, initializing game components...');
 
 // Constants
 const GRID_SIZE = 16;
-const CELL_SIZE = 30;
+const CELL_SIZE = 32;
 const GRID_LINE_WIDTH = 1;
-const GRID_LINE_COLOR = 0x666666;
+const GRID_LINE_COLOR = 0x999999;
 const COLORS = {
     1: 0x0000FF,   // blue
     2: 0x008000,   // green
@@ -40,16 +40,18 @@ const SPRITE_URLS = {
 };
 
 // Add sprite textures variable
-let spriteTextures = {};
+let spriteTextures = {
+    flag: null
+};
 
 // Game state
 let gameBoard = null;
-let board = [];
+let board = null;
 let revealed = new Set();
 let flagged = new Set();
 let gameStarted = false;
 let currentGameId = null;
-let cells = [];
+let cells = null;
 let app = null;
 let cursors = new Map(); // Store other players' cursors
 let playerName = urlParams.get('playerName') || 'Anonymous';
@@ -92,89 +94,92 @@ function updatePlayersList() {
     `;
 }
 
-// Update initializePixiJS function to force sprite reload
+// Initialize PIXI.JS application and containers
+let cursorContainer;
+
+// Initialize PIXI.JS
 function initializePixiJS() {
-    try {
-        debugLog('Creating PixiJS application...');
-        
-        if (typeof PIXI === 'undefined') {
-            throw new Error('PIXI is not defined - library not loaded');
-        }
+    debugLog('Initializing PIXI.JS...');
+    
+    // Create PIXI application
+    app = new PIXI.Application({
+        width: GRID_SIZE * CELL_SIZE,
+        height: GRID_SIZE * CELL_SIZE,
+        backgroundColor: 0x34495e,
+        resolution: window.devicePixelRatio || 1,
+    });
 
-        app = new PIXI.Application({
-            width: GRID_SIZE * CELL_SIZE,
-            height: GRID_SIZE * CELL_SIZE,
-            backgroundColor: 0x1099bb,
-            resolution: window.devicePixelRatio || 1,
-            antialias: true,
-            hello: true
-        });
+    // Add the canvas to the page
+    const gameCanvas = document.getElementById('gameCanvas');
+    gameCanvas.appendChild(app.view);
 
-        debugLog('Application created, loading sprites...');
-
-        // Clear texture cache to force reload
-        PIXI.Assets.unload(Object.values(SPRITE_URLS));
-        
-        // Load sprites with cache busting
-        const timestamp = Date.now();
-        const spritesToLoad = Object.values(SPRITE_URLS).map(url => `${url}?t=${timestamp}`);
-        
-        return PIXI.Assets.load(spritesToLoad).then((textures) => {
-            debugLog('Sprites loaded successfully');
-            // Store textures with original URLs as keys
-            spriteTextures.cursor = PIXI.Texture.from(`${SPRITE_URLS.cursor}?t=${timestamp}`);
-            spriteTextures.flag = PIXI.Texture.from(`${SPRITE_URLS.flag}?t=${timestamp}`);
-            
-            if (!gameCanvas) {
-                throw new Error('gameCanvas element not found in DOM');
-            }
-
-            gameCanvas.innerHTML = '';
-            gameCanvas.appendChild(app.view);
-            gameCanvas.style.display = 'block';
-            
-            // Prevent context menu on right click
-            app.view.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-            });
-
-            // Create game board container
-            gameBoard = new PIXI.Container();
-            app.stage.addChild(gameBoard);
-
-            debugLog('Creating grid cells...');
-
-            // Initialize grid
-            cells = new Array(GRID_SIZE);
-            for (let y = 0; y < GRID_SIZE; y++) {
-                cells[y] = new Array(GRID_SIZE);
-                for (let x = 0; x < GRID_SIZE; x++) {
-                    const cell = createCell(x, y);
-                    cells[y][x] = cell;
-                    gameBoard.addChild(cell);
-                }
-            }
-
-            // Center the game board
-            gameBoard.x = (app.screen.width - GRID_SIZE * CELL_SIZE) / 2;
-            gameBoard.y = (app.screen.height - GRID_SIZE * CELL_SIZE) / 2;
-
-            // Initialize cursor
-            initializeCursor();
-
-            debugLog('PixiJS initialized successfully');
-            return true;
-        }).catch(error => {
-            debugLog('Error loading sprites: ' + error);
-            throw error;
-        });
-    } catch (error) {
-        debugLog('Error initializing PixiJS: ' + error.message);
-        debugLog('Error stack: ' + error.stack);
-        gameStatus.textContent = 'Error initializing game: ' + error.message + '. Please refresh the page.';
+    // Prevent context menu on right click
+    app.view.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
         return false;
-    }
+    });
+
+    // Create main containers
+    gameBoard = new PIXI.Container();
+    cursorContainer = new PIXI.Container();
+    
+    // Set container properties
+    gameBoard.sortableChildren = true;
+    cursorContainer.sortableChildren = true;
+    
+    // Add containers to stage
+    app.stage.addChild(gameBoard);
+    app.stage.addChild(cursorContainer);
+    
+    // Load flag texture
+    PIXI.Assets.load('images/flag.png').then(texture => {
+        spriteTextures.flag = texture;
+        debugLog('Flag texture loaded');
+        initializeGame();
+    }).catch(error => {
+        debugLog('Error loading flag texture: ' + error);
+        // Continue initialization even if texture fails to load
+        initializeGame();
+    });
 }
+
+// Initialize the game
+function initializeGame() {
+    debugLog('Initializing game...');
+    
+    if (!gameBoard) {
+        debugLog('Error: gameBoard not initialized');
+        return;
+    }
+
+    // Initialize grid
+    cells = new Array(GRID_SIZE);
+    for (let y = 0; y < GRID_SIZE; y++) {
+        cells[y] = new Array(GRID_SIZE);
+        for (let x = 0; x < GRID_SIZE; x++) {
+            const cell = createCell(x, y);
+            cells[y][x] = cell;
+            gameBoard.addChild(cell);
+        }
+    }
+
+    // Center the game board
+    gameBoard.x = (app.screen.width - GRID_SIZE * CELL_SIZE) / 2;
+    gameBoard.y = (app.screen.height - GRID_SIZE * CELL_SIZE) / 2;
+    
+    // Initialize cursor tracking
+    initializeCursor();
+    
+    // Show game board and instructions
+    document.getElementById('gameCanvas').style.display = 'block';
+    document.getElementById('instructions').style.display = 'block';
+    
+    gameStarted = true;
+    debugLog('Game initialization complete');
+}
+
+// Start initialization when the script loads
+initializePixiJS();
 
 // Update the DOM cursor element to also use cache busting
 const timestamp = Date.now();
@@ -247,15 +252,6 @@ function getHueRotation(hexColor) {
 // Update mousemove handler
 document.addEventListener('mousemove', updateCursorPosition);
 
-// Initialize PixiJS with better error handling
-debugLog('Starting PixiJS initialization...');
-if (!initializePixiJS()) {
-    debugLog('PixiJS initialization failed - check previous error messages');
-    throw new Error('Failed to initialize PixiJS - check console for details');
-}
-
-debugLog('Setting up socket event handlers...');
-
 // Socket event handlers
 socket.on('connect', () => {
     console.log('Connected to server');
@@ -283,82 +279,80 @@ socket.on('error', (message) => {
     }, 2000);
 });
 
-socket.on('gameState', (data) => {
-    debugLog('Received game state data: ' + JSON.stringify(data));
+socket.on('gameState', ({ gameId, roomName, board: newBoard, revealed: revealedCells, flagged: flaggedCells, players: gamePlayers }) => {
+    debugLog('Received game state');
     
-    currentGameId = data.gameId;
-    board = data.board;
-    revealed = new Set(data.revealed);
-    flagged = new Set(data.flagged);
-    flagOwners = new Map(data.flagOwners || []);
-    gameStarted = true;
+    currentGameId = gameId;
+    board = newBoard;
     
-    // Update players list with current players
-    players.clear();
-    
-    // Add yourself first
-    players.set(socket.id, {
-        name: playerName,
-        cursorColor: urlParams.get('cursorColor') || 'FFFFFF'
-    });
-    
-    // Add other players
-    if (data.players && Array.isArray(data.players)) {
-        data.players.forEach(player => {
-            debugLog(`Processing player from game state: ${JSON.stringify(player)}`);
-            if (player.id !== socket.id) {
-                players.set(player.id, {
-                    name: player.name || 'Anonymous',
-                    cursorColor: player.cursorColor || 'FFFFFF'
-                });
-            }
-        });
-    }
-    updatePlayersList();
-    
-    // Initialize the game board if not already initialized
-    if (!cells || cells.length === 0) {
-        debugLog('Initializing game board...');
-        // Initialize grid
-        cells = new Array(GRID_SIZE);
-        for (let y = 0; y < GRID_SIZE; y++) {
-            cells[y] = new Array(GRID_SIZE);
-            for (let x = 0; x < GRID_SIZE; x++) {
-                const cell = createCell(x, y);
-                cells[y][x] = cell;
-                gameBoard.addChild(cell);
-            }
-        }
-
-        // Center the game board
-        gameBoard.x = (app.screen.width - GRID_SIZE * CELL_SIZE) / 2;
-        gameBoard.y = (app.screen.height - GRID_SIZE * CELL_SIZE) / 2;
-    }
-    
-    // Show game board and instructions
-    gameCanvas.style.display = 'block';
-    instructions.style.display = 'block';
+    // Initialize revealed and flagged sets
+    revealed = new Set(revealedCells);
+    flagged = new Set(flaggedCells);
     
     // Update status with room name if available
-    const roomName = urlParams.get('roomName');
-    gameStatus.textContent = roomName ? `Game: ${roomName}` : `Game ID: ${currentGameId}`;
+    const status = roomName ? `Game: ${roomName}` : `Game ID: ${currentGameId}`;
+    document.getElementById('gameStatus').textContent = status;
     
-    // Update the board display
-    debugLog('Updating board display...');
-    updateBoard();
+    // Update the board display if it's initialized
+    if (gameStarted && gameBoard) {
+        debugLog('Updating board display...');
+        updateBoard();
+    }
 });
 
+// Add flood fill function
+function floodFill(x, y) {
+    debugLog(`Starting flood fill at (${x},${y})`);
+    const directions = [
+        [-1, -1], [0, -1], [1, -1],  // Top row
+        [-1,  0],          [1,  0],  // Middle row
+        [-1,  1], [0,  1], [1,  1]   // Bottom row
+    ];
+
+    // For each adjacent cell
+    for (const [dx, dy] of directions) {
+        const newX = x + dx;
+        const newY = y + dy;
+        
+        // Skip if out of bounds
+        if (newX < 0 || newX >= GRID_SIZE || newY < 0 || newY >= GRID_SIZE) {
+            continue;
+        }
+        
+        const index = newY * GRID_SIZE + newX;
+        
+        // Skip if already revealed or flagged
+        if (revealed.has(index) || flagged.has(index)) {
+            continue;
+        }
+        
+        // Reveal this cell
+        debugLog(`Flood fill revealing (${newX},${newY})`);
+        socket.emit('revealCell', { x: newX, y: newY });
+    }
+}
+
 socket.on('cellRevealed', ({ x, y, value }) => {
-    debugLog(`Cell revealed at (${x},${y}) with value ${value}`);
+    debugLog(`Received reveal for cell (${x},${y}) with value ${value}`);
+    const index = y * GRID_SIZE + x;
+    revealed.add(index);
+    board[index] = value; // Update local board state
+    updateCell(x, y, value);
+    
+    // If this is an empty cell, flood fill to reveal adjacent cells
+    if (value === 0) {
+        debugLog(`Empty cell at (${x},${y}), starting flood fill`);
+        floodFill(x, y);
+    }
+    
+    // Handle mine explosion
     if (value === -1) {
         gameStatus.textContent = '💥 BOOM! A mine was hit! Redirecting to game list...';
         gameStarted = false;
         setTimeout(() => {
-            window.location.href = '/games.html';
+            window.location.href = 'games.html';
         }, 2000);
     }
-    revealed.add(y * GRID_SIZE + x);
-    updateCell(x, y, value);
 });
 
 socket.on('flagUpdated', ({ x, y, flagged: isFlagged, playerId }) => {
@@ -517,7 +511,6 @@ function createCell(x, y) {
     flag.width = CELL_SIZE * 0.8;
     flag.height = CELL_SIZE * 0.8;
     flag.visible = false;
-    // Create a ColorMatrixFilter but don't apply it yet
     flag.colorMatrix = new PIXI.ColorMatrixFilter();
     flag.filters = [flag.colorMatrix];
     cell.addChild(flag);
@@ -539,14 +532,15 @@ function createCell(x, y) {
     });
 
     cell.on('rightclick', (event) => {
-        if (gameStarted) {
+        if (gameStarted && !revealed.has(y * GRID_SIZE + x)) {
             event.stopPropagation();
             socket.emit('toggleFlag', { x, y, playerId: socket.id });
         }
     });
 
     cell.on('click', () => {
-        if (gameStarted && !flagged.has(y * GRID_SIZE + x)) {
+        if (gameStarted && !flagged.has(y * GRID_SIZE + x) && !revealed.has(y * GRID_SIZE + x)) {
+            debugLog(`Sending reveal request for cell (${x},${y})`);
             socket.emit('revealCell', { x, y });
         }
     });
